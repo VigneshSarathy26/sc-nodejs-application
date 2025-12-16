@@ -1,11 +1,250 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Microservice Frontend</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microservices E-commerce Dashboard</title>
+    <style>
+        /* --- General Styling --- */
+        body {
+            font-family: -apple-system, BlinkMacMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f6f9;
+            color: #333;
+        }
+
+        header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #1a237e;
+            font-size: 2.2em;
+        }
+
+        /* --- Health Check Styling --- */
+        .health-dashboard {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .service-card {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            width: 220px;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+
+        .service-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .status-indicator {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 10px;
+        }
+
+        .status-indicator.up {
+            background-color: #4caf50; /* Green */
+        }
+
+        .status-indicator.down {
+            background-color: #f44336; /* Red */
+        }
+
+        .status-indicator.pending {
+            background-color: #ff9800; /* Amber */
+        }
+
+        .status-text {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .service-card h3 {
+            margin-top: 0;
+            color: #1a237e;
+        }
+
+        /* --- Footer & API Docs --- */
+        .api-docs {
+            margin-top: 40px;
+            padding: 20px;
+            background-color: #e3f2fd;
+            border-radius: 8px;
+        }
+
+        .api-docs h2 {
+            color: #1a237e;
+        }
+
+        .api-docs code {
+            background-color: #bbdefb;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .api-docs ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .api-docs li {
+            margin-bottom: 10px;
+        }
+    </style>
 </head>
 <body>
-    <h1>E-commerce Microservices Demo</h1>
-    <p>This UI placeholder is running on port 8080 and communicates with the API Gateway on port 3000.</p>
-    <p>Authentication and Order submission logic would go here.</p>
+
+    <header>
+        <h1>🛒 Microservices E-commerce Dashboard</h1>
+        <p>Frontend served by Nginx. Services tested via API Gateway on port 3000.</p>
+    </header>
+
+    <h2>Microservice Health Status</h2>
+    <div class="health-dashboard">
+        <div class="service-card" id="card-user">
+            <h3>User Service (3001)</h3>
+            <p>
+                <span class="status-indicator pending" id="status-user"></span>
+                <span class="status-text">Checking...</span>
+            </p>
+        </div>
+
+        <div class="service-card" id="card-product">
+            <h3>Product Service (3002)</h3>
+            <p>
+                <span class="status-indicator pending" id="status-product"></span>
+                <span class="status-text">Checking...</span>
+            </p>
+        </div>
+
+        <div class="service-card" id="card-order">
+            <h3>Order Service (3003)</h3>
+            <p>
+                <span class="status-indicator pending" id="status-order"></span>
+                <span class="status-text">Checking...</span>
+            </p>
+        </div>
+
+        <div class="service-card" id="card-gateway">
+            <h3>API Gateway (3000)</h3>
+            <p>
+                <span class="status-indicator pending" id="status-gateway"></span>
+                <span class="status-text">Checking...</span>
+            </p>
+        </div>
+    </div>
+    
+    <div class="api-docs">
+        <h2>API Endpoints for Testing</h2>
+        <p>Use Postman or Insomnia for protected routes (Order). Default credentials: <code>alice@example.com</code> / <code>pass</code></p>
+        <ul>
+            <li>**Login (Auth):** <code>POST /api/auth/login</code></li>
+            <li>**Get Products:** <code>GET /api/products</code> (Public)</li>
+            <li>**Create Order:** <code>POST /api/orders</code> (Requires Bearer Token)</li>
+        </ul>
+    </div>
+
+
+    <script>
+        // Use the explicit full path for the browser to reach the Gateway
+        const API_GATEWAY_URL = 'http://localhost:3000'; 
+        
+        const serviceMap = {
+            // These are the API Gateway routes that will test the underlying service health
+            'user': '/api/auth/login', 
+            'product': '/api/products',
+            // Testing Order Service health implicitly via a dependency call (Product)
+            'order': '/api/products', 
+            // Gateway health is tested implicitly by testing any route
+            'gateway': '/api/products', 
+        };
+
+        // This function updates the UI based on the response status
+        function updateUI(serviceName, isUp, statusMessage) {
+            const statusElement = document.getElementById(`status-${serviceName}`);
+            const textElement = statusElement.nextElementSibling;
+            
+            statusElement.className = `status-indicator ${isUp ? 'up' : 'down'}`;
+            textElement.textContent = statusMessage;
+        }
+
+        async function checkServiceHealth(serviceName, endpoint) {
+            
+            // Set initial pending state
+            updateUI(serviceName, false, 'Checking...');
+
+            const checkUrl = API_GATEWAY_URL + endpoint;
+
+            try {
+                // Use a short timeout to prevent the health check from hanging the UI
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000); 
+
+                const response = await fetch(checkUrl, { method: 'GET', signal: controller.signal });
+                clearTimeout(timeoutId);
+                
+                if (response.status >= 200 && response.status < 300) {
+                    // Success or Redirect (Product/User services are reachable)
+                    updateUI(serviceName, true, `UP (${response.status})`);
+                    return true;
+                } else if (response.status >= 400) {
+                    // Gateway is running, but the underlying service returned an error (e.g., 404, 500)
+                    // This still means the network path is open, but the application logic failed.
+                    updateUI(serviceName, false, `DOWN (${response.status} - App Error)`);
+                    return false;
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    // Timeout occurred
+                    updateUI(serviceName, false, 'DOWN (Timeout)');
+                } else if (error.message.includes('Failed to fetch')) {
+                    // Network error (CORS or container down/not reachable)
+                    updateUI(serviceName, false, 'DOWN (Network/CORS Fail)');
+                } else {
+                    // Other errors
+                    updateUI(serviceName, false, `DOWN (${error.message})`);
+                }
+                return false;
+            }
+        }
+
+        async function updateHealthChecks() {
+            // Check Gateway first (using a static public route)
+            await checkServiceHealth('gateway', serviceMap['gateway']);
+            
+            // User Service check (checks routing to 3001)
+            await checkServiceHealth('user', serviceMap['user']); 
+            
+            // Product Service check (checks routing to 3002)
+            await checkServiceHealth('product', serviceMap['product']); 
+            
+            // Order Service check (we use a product route for simplicity)
+            await checkServiceHealth('order', serviceMap['product']); 
+        }
+
+        // Run immediately and then every 5 seconds
+        updateHealthChecks();
+        setInterval(updateHealthChecks, 5000);
+        
+        // Initial state for the Gateway card (since the page loaded)
+        document.addEventListener('DOMContentLoaded', () => {
+             document.getElementById('status-gateway').className = 'status-indicator pending';
+             document.getElementById('status-gateway').nextElementSibling.textContent = 'Checking...';
+        });
+    </script>
 </body>
 </html>

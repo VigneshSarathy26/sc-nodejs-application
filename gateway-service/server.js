@@ -1,116 +1,95 @@
 const express = require('express');
-const axios = require('axios');
-const winston = require('winston');
+const httpProxy = require('express-http-proxy');
 const jwt = require('jsonwebtoken');
+const morgan = require('morgan');
+const winston = require('winston');
+const cors = require('cors'); // <-- NEW: Required for Frontend communication
 
-// --- 1. EXPRESS & MIDDLEWARE INITIALIZATION (CRITICAL FIX) ---
 const app = express();
 const PORT = 3000;
-app.use(express.json()); // Essential middleware for parsing JSON bodies
-// -------------------------------------------------------------
 
-// --- 2. SERVICE & AUTH CONFIGURATION ---
+// --- CONFIGURATION ---
+const AUTH_SECRET = process.env.AUTH_SECRET || 'your_secret_key'; // Used for JWT validation
 const USER_SERVICE_URL = process.env.USER_SERVICE_URL || 'http://user-service:3001';
 const PRODUCT_SERVICE_URL = process.env.PRODUCT_SERVICE_URL || 'http://product-service:3002';
 const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://order-service:3003';
-const AUTH_SECRET = process.env.AUTH_SECRET || 'my_secure_jwt_secret';
 
-// --- 3. WINSTON LOGGER SETUP ---
+// --- WINSTON LOGGER SETUP ---
 const logger = winston.createLogger({
     level: 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-    ),
+    format: winston.format.json(),
     transports: [
         new winston.transports.Console(),
     ],
 });
 
-// --- 4. AUTHENTICATION MIDDLEWARE ---
-// This function verifies the JWT sent by the client
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    // Expects header format: 'Bearer TOKEN'
-    const token = authHeader && authHeader.split(' ')[1]; 
+// --- MIDDLEWARE ---
+app.use(express.json()); // To parse JSON bodies
+app.use(morgan('short')); // HTTP request logging
 
-    if (token == null) {
-        logger.warn('Authentication failure: No token provided', { route: req.originalUrl, ip: req.ip });
-        return res.sendStatus(401); // Unauthorized
+// --- CORS CONFIGURATION (CRITICAL FIX for Frontend Dashboard) ---
+app.use(cors({
+    origin: 'http://localhost:8080', // Only allow requests from the frontend UI
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true
+}));
+// ------------------------------------------
+
+// --- PROXY SETUP ---
+const userServiceProxy = httpProxy(USER_SERVICE_URL);
+const productServiceProxy = httpProxy(PRODUCT_SERVICE_URL);
+const orderServiceProxy = httpProxy(ORDER_SERVICE_URL);
+
+// --- JWT AUTHENTICATION MIDDLEWARE ---
+const authenticateJWT = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader) {
+        const token = authHeader.split(' ')[1];
+
+        jwt.verify(token, AUTH_SECRET, (err, user) => {
+            if (err) {
+                logger.error('JWT Validation Error', { error: err.message, token });
+                return res.sendStatus(403); // Forbidden
+            }
+            
+            // Attach user payload (userId, role) to the request object
+            req.user = user; 
+            logger.info('JWT validated successfully', { userId: user.userId, role: user.role });
+            next();
+        });
+    } else {
+        res.sendStatus(401); // Unauthorized (No token provided)
     }
-
-    jwt.verify(token, AUTH_SECRET, (err, user) => {
-        if (err) {
-            logger.error('Authentication failure: Invalid or expired token', { route: req.originalUrl, ip: req.ip, error: err.message });
-            return res.sendStatus(403); // Forbidden
-        }
-        req.user = user; // Attach decoded user payload (userId, email, role) to the request
-        next();
-    });
 };
 
-// --- 5. ROUTING AND PROXY LOGIC ---
+// --- ROUTING ---
 
-// A. Route to User Service (for /auth/login, etc.)
-app.use('/api/auth', (req, res) => {
-    logger.info(`Routing to User Service`, { method: req.method, route: req.originalUrl, ip: req.ip });
-    const url = `${USER_SERVICE_URL}${req.originalUrl.replace('/api/auth', '/auth')}`;
+// 1. User & Authentication (Public)
+app.use('/api/auth', (req, res, next) => {
+    logger.info('Routing to User Service', { method: req.method, route: req.url, ip: req.ip });
+    userServiceProxy(req, res, next);
+});
+
+// 2. Product Service (Public)
+app.use('/api/products', (req, res, next) => {
+    logger.info('Routing to Product Service', { method: req.method, route: req.url, ip: req.ip });
+    productServiceProxy(req, res, next);
+});
+
+// 3. Order Service (Protected)
+app.use('/api/orders', authenticateJWT, (req, res, next) => {
+    // Before proxying, inject the userId from the validated JWT payload into the request body
+    // This allows the Order Service to know who placed the order without re-validating the JWT.
+    if (req.method === 'POST') {
+        req.body.userId = req.user.userId;
+        logger.info('PROTECTED Request received for new order', { userId: req.user.userId, ip: req.ip });
+    }
     
-    // Proxy POST request (like login)
-    axios.post(url, req.body)
-        .then(response => res.json(response.data))
-        .catch(error => {
-            const status = error.response ? error.response.status : 500;
-            const message = error.response ? error.response.data : error.message;
-            logger.error('User Auth Service Error', { status: status, message: message });
-            res.status(status).send(message);
-        });
+    orderServiceProxy(req, res, next);
 });
 
-// B. Route to Product Service (Publicly accessible)
-app.get('/api/products', (req, res) => {
-    logger.info('Request received for all products', { route: req.originalUrl, ip: req.ip });
-    axios.get(`${PRODUCT_SERVICE_URL}/products`)
-        .then(response => res.json(response.data))
-        .catch(error => {
-            logger.error('Product Service Error', { status: 500, message: error.message });
-            res.status(500).send('Product Service Error: ' + error.message);
-        });
-});
-
-app.get('/api/products/:productId', (req, res) => {
-    logger.info('Request received for single product', { route: req.originalUrl, ip: req.ip });
-    axios.get(`${PRODUCT_SERVICE_URL}/products/${req.params.productId}`)
-        .then(response => res.json(response.data))
-        .catch(error => {
-            const status = error.response ? error.response.status : 500;
-            const message = error.response ? error.response.data : error.message;
-            logger.error('Product Service Error', { status: status, message: message });
-            res.status(status).send(message);
-        });
-});
-
-// C. Route to Order Service (PROTECTED ROUTE) 
-app.post('/api/orders', authenticateToken, (req, res) => {
-    logger.info('PROTECTED Request received for new order', { user: req.user.userId, route: req.originalUrl, ip: req.ip });
-
-    // The order service needs the userId, which we can extract from the JWT payload (req.user)
-    const orderData = {
-        ...req.body,
-        userId: req.user.userId // Inject userId from the authenticated token
-    };
-
-    axios.post(`${ORDER_SERVICE_URL}/orders`, orderData)
-        .then(response => res.status(201).json(response.data))
-        .catch(error => {
-            const status = error.response ? error.response.status : 500;
-            const message = error.response ? error.response.data : error.message;
-            logger.error('Order Service Error', { status: status, message: message, user: req.user.userId });
-            res.status(status).send(message);
-        });
-});
-
-// --- 6. START SERVER ---
+// --- START SERVER ---
 app.listen(PORT, () => {
-    console.log(`API Gateway running on http://localhost:${PORT}`);
+    logger.info(`API Gateway running on http://localhost:${PORT}`);
 });
