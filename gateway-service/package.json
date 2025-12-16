@@ -1,0 +1,15 @@
+{
+  "name": "gateway-service",
+  "version": "1.0.0",
+  "description": "API Gateway for routing and authentication.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "axios": "^1.7.2",
+    "jsonwebtoken": "^9.0.2",
+    "winston": "^3.13.0"
+  }
+}

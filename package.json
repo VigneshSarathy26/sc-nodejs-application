@@ -1,0 +1,24 @@
+{
+  "name": "sc-nodejs-application",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node ./gateway-service/server.js",
+    "test": "jest"
+  },
+  "description": "",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "amqplib": "^0.10.9",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.0.1",
+    "redis": "^5.10.0",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
+  }
+}

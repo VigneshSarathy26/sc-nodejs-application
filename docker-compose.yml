@@ -1,0 +1,129 @@
+name: microservice-architecture
+
+services:
+  # 6. Redis Cache Service
+  redis:
+    image: redis:6.2-alpine
+    container_name: redis-cache
+    networks:
+      - microservice-network
+    expose:
+      - "6379"
+
+  # 7. RabbitMQ Messaging Service
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port"]
+      interval: 5s
+      timeout: 15s
+      retries: 5
+    container_name: rabbitmq-broker
+    networks:
+      - microservice-network
+    ports:
+      - "5672:5672" # Standard AMQP port
+      - "15672:15672" # Management UI port
+    expose:
+      - "5672"
+
+  # 8. UI/Frontend Service (Placeholder)
+  frontend:
+    build:
+      context: ./frontend-service
+      dockerfile: Dockerfile # New service directory
+    container_name: frontend-ui
+    networks:
+      - microservice-network
+    ports:
+      - "8080:80" # Map host 8080 to container 80
+    depends_on:
+      - gateway-service
+
+  # --- Existing Services (Updated dependencies and environment variables) ---
+
+  # 1. User Service
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    networks:
+      - microservice-network
+    ports:
+      - "3001:3001" # Map host 3001 to container 3001
+    environment:
+      # NEW: Dependency for Authentication Example
+      - AUTH_SECRET=my_secure_jwt_secret
+
+  # 2. Product Service (Cache integrated)
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: product-service
+    networks:
+      - microservice-network
+    ports:
+      - "3002:3002" # Map host 3002 to container 3002
+    depends_on:
+      - db
+      - redis # NEW: Added Redis dependency
+    environment:
+      # ... existing environment variables ...
+      # NEW: Redis connection for caching
+      - REDIS_URL=redis://redis:6379
+
+  # 3. Order Service (Messaging integrated)
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: order-service
+    networks:
+      - microservice-network
+    ports:
+      - "3003:3003" # Map host 3003 to container 3003
+    depends_on:
+      - product-service
+      - rabbitmq
+    environment:
+      # ... existing environment variables ...
+      # NEW: RabbitMQ connection for notifications
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+
+  # 4. API Gateway (Authentication, Logging integrated)
+  gateway-service:
+    build:
+      context: ./gateway-service
+      dockerfile: Dockerfile
+    container_name: gateway-service
+    networks:
+      - microservice-network
+    ports:
+      - "3000:3000" # Map host 3000 to container 3000
+    depends_on:
+      # ... existing dependencies ...
+      - user-service # Need User service for auth
+    environment:
+      # ... existing environment variables ...
+      # NEW: Auth secret for JWT verification
+      - AUTH_SECRET=my_secure_jwt_secret
+
+  db:
+    image: mongo:latest # Use the official MongoDB image
+    container_name: mongodb-container
+    networks:
+      - microservice-network
+    # Only expose port 27017 internally for the services to connect
+    expose:
+      - "27017"
+    # Set credentials/environment for the database
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: ecom_products
+# Define the custom bridge network
+networks:
+  microservice-network:
+    driver: bridge
