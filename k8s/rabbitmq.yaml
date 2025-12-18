@@ -5,7 +5,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: rabbitmq
+      app: rabbitmq-container
   template:
     metadata:
       labels:
@@ -24,7 +24,7 @@ metadata:
   name: rabbitmq-service
 spec:
   selector:
-    app: rabbitmq
+    app: rabbitmq-container
   ports:
   - port: 5672
     targetPort: 5672

@@ -5,7 +5,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: redis
+      app: redis-cache
   template:
     metadata:
       labels:
@@ -24,7 +24,7 @@ metadata:
   name: redis-service
 spec:
   selector:
-    app: redis-cache
+    app: redis
   ports:
   - port: 6379
     targetPort: 6379
