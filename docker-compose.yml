@@ -7,6 +7,8 @@ services:
     container_name: redis-cache
     networks:
       - microservice-network
+    ports:
+      - "6379:6379"
     expose:
       - "6379"
 
@@ -115,6 +117,8 @@ services:
     container_name: mongodb-container
     networks:
       - microservice-network
+    ports:
+      - "27017:27017"  
     # Only expose port 27017 internally for the services to connect
     expose:
       - "27017"
